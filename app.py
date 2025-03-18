@@ -1,79 +1,114 @@
-from flask import Flask, request
+​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​from flask import Flask, request
 import telegram
-from telegram import ReplyKeyboardMarkup
+from telegram import ReplyKeyboardMarkup, TelegramError
 import os
 import asyncio
 import httpx
-from telegram import Bot
-import asyncio
+import logging
 
-# Увеличиваем лимит соединений
-client = httpx.AsyncClient(limit=50)  # Увеличиваем лимит соединений
+# Настройка логирования для отладки
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# Создаем объект бота с клиентом
-bot = Bot(token="YOUR_BOT_TOKEN", request_kwargs={"client": client})
-
-TOKEN = os.getenv("BOT_TOKEN")
-bot = telegram.Bot(token=TOKEN)
+# Создаем Flask приложение
 app = Flask(__name__)
 
-# Ограничиваем количество одновременных соединений (например, 10)
+# Получаем токен из переменной окружения
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("BOT_TOKEN не установлен в переменных окружения")
+
+# Создаем асинхронный HTTP-клиент с увеличенным лимитом соединений
+client = httpx.AsyncClient(limits=httpx.Limits(max_connections=50, max_keepalive_connections=20))
+
+# Создаем объект бота с кастомным клиентом
+bot = telegram.Bot(token=TOKEN, request_kwargs={"client": client})
+
+# Создаем семафор для ограничения одновременных запросов
 semaphore = asyncio.Semaphore(10)
 
-async def send_message(chat_id, text, buttons=None):
-    async with semaphore:  # Ограничиваем число одновременных запросов
-        if buttons:
-            reply_markup = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
-            await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
-        else:
-            await bot.send_message(chat_id=chat_id, text=text)
-from telegram import TelegramError
-
-# Функция для отправки сообщения с повторными попытками
-async def send_message_with_retry(chat_id, text, retries=3, delay=2):
-    for attempt in range(retries):
-        try:
-            await bot.send_message(chat_id, text)
-            return  # Сообщение успешно отправлено
-        except TelegramError as e:
-            if attempt < retries - 1:
-                print(f"Ошибка при отправке сообщения, повторная попытка через {delay} секунд...")
-                await asyncio.sleep(delay)
-                continue  # Повторяем попытку
-            else:
-                print(f"Ошибка при отправке сообщения: {e}")
-                raise  # В конце выбрасываем ошибку, если все попытки неудачны
-# Создаем семафор для ограничения количества одновременно выполняющихся запросов
-semaphore = asyncio.Semaphore(10)  # Ограничиваем количество одновременно выполняющихся запросов
-
-# Асинхронная функция для отправки сообщения с использованием семафора
-async def send_message(chat_id, text):
+# Асинхронная функция для отправки сообщения с повторными попытками
+async def send_message_with_retry(chat_id, text, buttons=None, retries=3, delay=2):
     async with semaphore:
-        await send_message_with_retry(chat_id, text)
+        for attempt in range(retries):
+            try:
+                if buttons:
+                    reply_markup = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+                    await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+                else:
+                    await bot.send_message(chat_id=chat_id, text=text)
+                logger.info(f"Сообщение успешно отправлено в чат {chat_id}")
+                return  # Успешно отправлено
+            except TelegramError as e:
+                if attempt < retries - 1:
+                    logger.warning(f"Ошибка {e}, повторная попытка {attempt + 1}/{retries} через {delay} сек...")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Не удалось отправить сообщение после {retries} попыток: {e}")
+                    raise
 
+# Обработка вебхука
 @app.route("/", methods=["POST"])
-async def webhook():
-    update = telegram.Update.de_json(request.get_json(), bot)
+def webhook():
+    # Получаем данные из запроса
+    data = request.get_json()
+    if not data:
+        logger.error("Нет данных в запросе")
+        return "No data", 400
+
+    # Парсим обновление
+    update = telegram.Update.de_json(data, bot)
+    if not update or not update.message:
+        logger.error(f"Некорректное обновление: {data}")
+        return "Invalid update", 400
+
     chat_id = update.message.chat.id
     text = update.message.text
+    logger.info(f"Получено сообщение от {chat_id}: {text}")
 
+    # Определяем главное меню
     main_menu = [["🤖 AI-ассистент", "🛍 Маркетплейс"], ["🥗 Подбор еды", "💬 Поддержка"]]
 
-    if text == "/start":
-        await send_message(chat_id, "Привет! Выберите, чем я могу помочь:", main_menu)
-    elif text == "🤖 AI-ассистент":
-        await send_message(chat_id, "Я ваш AI-ассистент! Задайте мне вопрос.")
-    elif text == "🛍 Маркетплейс":
-        await send_message(chat_id, "Маркетплейс скоро будет доступен!")
-    elif text == "🥗 Подбор еды":
-        await send_message(chat_id, "Опишите ваш рацион, и я помогу подобрать питание.")
-    elif text == "💬 Поддержка":
-        await send_message(chat_id, "Если вам нужна помощь, напишите нашему оператору.")
-    else:
-        await send_message(chat_id, "Я пока не знаю эту команду. Попробуйте выбрать из меню.")
+    # Асинхронная функция обработки ответа
+    async def process_response():
+        try:
+            if text == "/start":
+                await send_message_with_retry(chat_id, "Привет! Выберите, чем я могу помочь:", main_menu)
+            elif text == "🤖 AI-ассистент":
+                await send_message_with_retry(chat_id, "Я ваш AI-ассистент! Задайте мне вопрос.")
+            elif text == "🛍 Маркетплейс":
+                await send_message_with_retry(chat_id, "Маркетплейс скоро будет доступен!")
+            elif text == "🥗 Подбор еды":
+                await send_message_with_retry(chat_id, "Опишите ваш рацион, и я помогу подобрать питание.")
+            elif text == "💬 Поддержка":
+                await send_message_with_retry(chat_id, "Если вам нужна помощь, напишите нашему оператору.")
+            else:
+                await send_message_with_retry(chat_id, "Я пока не знаю эту команду. Попробуйте выбрать из меню.", main_menu)
+        except Exception as e:
+            logger.error(f"Ошибка обработки сообщения: {e}")
 
-    return "OK"
+    # Запускаем асинхронную задачу
+    asyncio.run(process_response())
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    return "OK", 200
 
+# Закрытие клиента при завершении работы приложения
+@app.teardown_appcontext
+def shutdown_client(exception=None):
+    try:
+        asyncio.run(client.aclose())
+        logger.info("HTTP-клиент успешно закрыт")
+    except Exception as e:
+        logger.
+
+A K 🏦, [18.03.2025 17:47]
+error(f"Ошибка при закрытии клиента: {e}")
+
+if name == "__main__":
+    # Render задает порт через переменную окружения PORT
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​

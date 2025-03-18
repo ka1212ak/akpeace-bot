@@ -15,7 +15,7 @@ def webhook():
     if request.method == "POST":
         update = telegram.Update.de_json(request.get_json(), bot)
         chat_id = update.message.chat.id
-        asyncio.run(send_message(chat_id, "Привет! Я работаю!"))
+        asyncio.run(send_message(chat_id, "Привет! Я Антоний Великолепный!"))
     return "OK"
 
 if __name__ == "__main__":

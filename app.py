@@ -3,6 +3,15 @@ import telegram
 from telegram import ReplyKeyboardMarkup
 import os
 import asyncio
+import httpx
+from telegram import Bot
+import asyncio
+
+# Увеличиваем лимит соединений
+client = httpx.AsyncClient(limit=50)  # Увеличиваем лимит соединений
+
+# Создаем объект бота с клиентом
+bot = Bot(token="YOUR_BOT_TOKEN", request_kwargs={"client": client})
 
 TOKEN = os.getenv("BOT_TOKEN")
 bot = telegram.Bot(token=TOKEN)
@@ -18,6 +27,29 @@ async def send_message(chat_id, text, buttons=None):
             await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
         else:
             await bot.send_message(chat_id=chat_id, text=text)
+from telegram import TelegramError
+
+# Функция для отправки сообщения с повторными попытками
+async def send_message_with_retry(chat_id, text, retries=3, delay=2):
+    for attempt in range(retries):
+        try:
+            await bot.send_message(chat_id, text)
+            return  # Сообщение успешно отправлено
+        except TelegramError as e:
+            if attempt < retries - 1:
+                print(f"Ошибка при отправке сообщения, повторная попытка через {delay} секунд...")
+                await asyncio.sleep(delay)
+                continue  # Повторяем попытку
+            else:
+                print(f"Ошибка при отправке сообщения: {e}")
+                raise  # В конце выбрасываем ошибку, если все попытки неудачны
+# Создаем семафор для ограничения количества одновременно выполняющихся запросов
+semaphore = asyncio.Semaphore(10)  # Ограничиваем количество одновременно выполняющихся запросов
+
+# Асинхронная функция для отправки сообщения с использованием семафора
+async def send_message(chat_id, text):
+    async with semaphore:
+        await send_message_with_retry(chat_id, text)
 
 @app.route("/", methods=["POST"])
 async def webhook():

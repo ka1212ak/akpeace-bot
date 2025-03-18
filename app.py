@@ -97,9 +97,9 @@ def webhook():
 
 # Закрытие клиента при завершении работы приложения
 @app.teardown_appcontext
-def shutdown_client(exception=None):
+async def shutdown_client(exception=None):
     try:
-        asyncio.run(client.aclose())  # Закрываем HTTP-клиент асинхронно
+        await client.aclose()  # Закрываем HTTP-клиент асинхронно
         logger.info("HTTP-клиент успешно закрыт")
     except Exception as e:
         logger.error(f"Ошибка при закрытии клиента: {e}")
@@ -108,4 +108,3 @@ if __name__ == "__main__":
     # Render задает порт через переменную окружения PORT
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-

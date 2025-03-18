@@ -1,4 +1,4 @@
-​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​from flask import Flask, request
+from flask import Flask, request
 import telegram
 from telegram import ReplyKeyboardMarkup, TelegramError
 import os
@@ -102,11 +102,7 @@ def shutdown_client(exception=None):
         asyncio.run(client.aclose())
         logger.info("HTTP-клиент успешно закрыт")
     except Exception as e:
-        logger.
-
-A K 🏦, [18.03.2025 17:47]
-error(f"Ошибка при закрытии клиента: {e}")
-
+        logger.error(f"Ошибка при закрытии клиента: {e}")
 if name == "__main__":
     # Render задает порт через переменную окружения PORT
     port = int(os.getenv("PORT", 5000))

@@ -91,7 +91,7 @@ def webhook():
             logger.error(f"Ошибка обработки сообщения: {e}")
 
     # Запускаем асинхронную задачу
-    asyncio.run(process_response())
+    asyncio.create_task(process_response())  # Запуск асинхронной задачи без блокировки
 
     return "OK", 200
 
@@ -99,7 +99,7 @@ def webhook():
 @app.teardown_appcontext
 def shutdown_client(exception=None):
     try:
-        asyncio.run(client.aclose())
+        asyncio.run(client.aclose())  # Закрываем HTTP-клиент асинхронно
         logger.info("HTTP-клиент успешно закрыт")
     except Exception as e:
         logger.error(f"Ошибка при закрытии клиента: {e}")
@@ -108,3 +108,4 @@ if __name__ == "__main__":
     # Render задает порт через переменную окружения PORT
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
